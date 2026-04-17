@@ -1,5 +1,10 @@
 # copilot-router
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+
+*Extracted from [GENesis-AGI](https://github.com/WingedGuardian/GENesis-AGI), a production agentic cognitive architecture with ~40 heterogeneous LLM call sites. This is the standalone routing primitive.*
+
 **LLM routing with circuit breaker, self-escalation, and multi-provider failover chains.**
 
 ## Features
