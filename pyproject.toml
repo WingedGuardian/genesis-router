@@ -1,26 +1,49 @@
-[project]
-name = "copilot-router"
-version = "0.1.0"
-description = "LLM routing with circuit breaker, self-escalation, and failover chains"
-requires-python = ">=3.11"
-license = {text = "MIT"}
-keywords = ["ai", "llm", "routing", "failover", "circuit-breaker"]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-]
-
-dependencies = [
-    "loguru>=0.7.0",
-]
-
-[project.optional-dependencies]
-litellm = ["litellm>=1.0.0"]
-cost = ["aiosqlite>=0.19.0"]
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[project]
+name = "genesis-router"
+version = "2.0.0"
+description = "Production-grade LLM routing with circuit breakers, fallback chains, rate limiting, and cost tracking"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [{ name = "WingedGuardian" }]
+keywords = ["llm", "routing", "circuit-breaker", "failover", "ai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "pyyaml>=6.0",
+    "aiosqlite>=0.19",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.30"]
+openai = ["openai>=1.0"]
+groq = ["groq>=0.5"]
+all = ["anthropic>=0.30", "openai>=1.0", "groq>=0.5"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.4"]
+
+[project.urls]
+Homepage = "https://github.com/WingedGuardian/genesis-router"
+Source = "https://github.com/WingedGuardian/genesis-router"
+Issues = "https://github.com/WingedGuardian/genesis-router/issues"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
