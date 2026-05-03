@@ -1,0 +1,69 @@
+# Genesis Router — Example Configuration
+#
+# Three providers with a single call site demonstrating the full
+# resilience stack: fallback chains, circuit breakers, rate limiting,
+# and retry policies.
+#
+# Environment variables are expanded: ${VAR} or ${VAR:-default}
+
+providers:
+  anthropic-sonnet:
+    type: anthropic
+    model: claude-sonnet-4-6-20250514
+    free: false
+    rpm_limit: 60
+    open_duration_s: 120
+
+  openai-gpt4o-mini:
+    type: openai
+    model: gpt-4o-mini
+    free: false
+    rpm_limit: 100
+    open_duration_s: 60
+
+  groq-llama:
+    type: groq
+    model: llama-3.1-8b-instant
+    free: true
+    rpm_limit: 30
+    open_duration_s: 60
+
+  # OpenAI-compatible endpoint (Ollama, LM Studio, etc.)
+  # local-llm:
+  #   type: lmstudio
+  #   model: mistral-small-3.2-24b-instruct
+  #   base_url: ${LM_STUDIO_URL:-http://localhost:1234/v1}
+  #   free: true
+  #   enabled: ${ENABLE_LOCAL:-false}
+
+call_sites:
+  chat:
+    chain:
+      - anthropic-sonnet
+      - openai-gpt4o-mini
+      - groq-llama
+    retry_profile: default
+
+  # never_pays: true restricts the chain to free providers only.
+  # Here only groq-llama (free: true) will be used; openai-gpt4o-mini
+  # is kept as documentation but skipped at runtime.
+  summarize:
+    chain:
+      - groq-llama
+    never_pays: true
+    retry_profile: fast
+
+retry:
+  default:
+    max_retries: 3
+    base_delay_ms: 500
+    max_delay_ms: 30000
+    backoff_multiplier: 2.0
+    jitter_pct: 0.25
+
+  fast:
+    max_retries: 1
+    base_delay_ms: 200
+    max_delay_ms: 2000
+    backoff_multiplier: 1.5
+    jitter_pct: 0.1
