@@ -4,17 +4,62 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-passing-green.svg)]()
 
-**Production-grade LLM routing with circuit breakers, fallback chains, rate limiting, and cost tracking.**
+**Self-healing LLM routing. No manual intervention required.**
 
-Extracted from [GENesis-AGI](https://github.com/WingedGuardian/GENesis-AGI) — an autonomous cognitive architecture that routes ~40 heterogeneous LLM call sites across 15+ providers. This is the standalone routing engine.
+When a provider goes down, genesis-router detects it, routes around it, and recovers automatically when it comes back. You find out what happened from the event log — not from a crash at 3am.
+
+Extracted from [GENesis-AGI](https://github.com/WingedGuardian/GENesis-AGI) — an autonomous cognitive architecture that routes ~40 heterogeneous LLM call sites across 15+ providers without human intervention. This is the standalone routing engine.
 
 ---
 
 ## Why This Exists
 
-Most LLM routers are glorified try/except blocks. When your primary provider goes down at 3am, they fail. When you hit a rate limit, they fail. When your provider starts returning garbage, they keep sending traffic.
+Most LLM routers are glorified try/except blocks. Provider goes down? You get a 500. Rate limit hit? You get a 429. Quota exhausted? Retry loop until timeout. The developer gets paged, manually switches providers, and deploys a fix.
 
-Genesis Router handles all of this:
+Genesis Router was built for systems that **can't stop to wait for a human**. It detects failures, classifies them, routes around them, and self-heals — all without manual intervention.
+
+### The Self-Healing Loop
+
+```
+Provider goes down
+  │
+  ▼
+1. DETECT — Error classification identifies the failure type
+   │         (transient? permanent? quota exhausted? degraded?)
+   │
+   ▼
+2. ISOLATE — Circuit breaker trips OPEN, stops sending traffic
+   │          to the failing provider immediately
+   │
+   ▼
+3. ROUTE AROUND — Fallback chain activates, traffic flows
+   │               through healthy providers seamlessly
+   │
+   ▼
+4. RECOVER — After cooldown, circuit enters HALF_OPEN state
+   │          and sends a probe request to test recovery
+   │
+   ▼
+5. VERIFY — Probe succeeds → still HALF_OPEN. Second probe
+   │         succeeds → CLOSED. Provider is back in rotation.
+   │         Probe fails → back to OPEN with escalating backoff
+   │         (2x longer each consecutive trip, up to 30min)
+   │
+   ▼
+6. REPORT — Every state change emits an event. You know exactly
+            what failed, when, which fallback was used, and when
+            recovery completed. No guessing.
+```
+
+**When manual intervention IS needed, you know exactly why:**
+- Circuit breaker hit the 30-minute cap → provider has a sustained outage, not a blip
+- Quota exhaustion with 4-hour backoff → billing issue, not a transient error
+- All providers exhausted → your entire chain is down, time to add capacity
+- Budget exceeded → spending limit hit, business decision needed
+
+The system tells you *which* failure mode triggered and *what* to fix. It never just says "error."
+
+### What This Looks Like in Practice
 
 ```
 Request arrives
@@ -31,24 +76,39 @@ Request arrives
     ├── Circuit breaker: CLOSED ✓
     ├── Call succeeds → record_success
     └── Return result + emit fallback event
-  → Background: recovery probe on anthropic
-    → Succeeds → HALF_OPEN → 2 successes → CLOSED
+  → Later: cooldown expires on anthropic
+    → Probe succeeds → HALF_OPEN → 2 successes → CLOSED
+    → Provider back in rotation. Zero downtime. Zero manual intervention.
 ```
 
-Every resilience layer is real, tested, and battle-hardened from production use.
+Every resilience layer is real, tested, and extracted from a production system that runs 24/7.
 
 ## Features
 
-- **3-state circuit breaker** — CLOSED → OPEN → HALF_OPEN with escalating backoff (doubles per consecutive trip, caps at 30min / 4h for quota exhaustion)
-- **Per-call-site fallback chains** — different provider priorities for different use cases (cheap model for summarization, powerful model for reasoning)
-- **RPM-aware rate limiting** — serializes requests to respect provider RPM limits, prevents thundering herd on fallback
-- **Error classification** — distinguishes transient (retry), permanent (don't retry), quota exhaustion (long backoff), and degraded (retry once)
-- **Exponential backoff with jitter** — configurable retry policies per call site
-- **Cost tracking + budget enforcement** — SQLite-backed daily/weekly/monthly budget limits with warning thresholds
-- **YAML config with env var expansion** — `${API_KEY}` and `${VAR:-default}` syntax, local overlay support
-- **Hot-reloadable config** — swap routing config without restart, circuit breaker state preserved
-- **Model alias resolution** — type "sonnet" instead of "anthropic/claude-sonnet-4-6", fuzzy matching included
-- **Protocol-based extensibility** — implement `CallDelegate` for any LLM backend, optional `EventHook` for observability
+### Resilience
+- **Unlimited provider chaining** — Add as many providers and API keys as you want. Chain 2 providers or 15 — the router walks the entire chain until one succeeds. Mix paid and free models, cloud and local, fast and powerful. Every provider you add is another layer of redundancy.
+- **Free-model safety net** — Mark providers as `free: true` and use `never_pays: true` on budget-conscious call sites. Even if every paid provider is down or your budget is exhausted, free models (Groq, Ollama, Cerebras, etc.) keep your system running. The router automatically skips paid providers when budget limits are hit — it doesn't error, it degrades gracefully to free alternatives.
+- **3-state circuit breaker** — CLOSED → OPEN → HALF_OPEN with escalating backoff. Each consecutive trip doubles the cooldown (120s → 240s → 480s), capped at 30 minutes. Quota exhaustion gets a separate 4-hour cap because billing issues don't resolve in minutes.
+- **Intelligent error classification** — Not all errors are the same. The router classifies each failure as transient (retry with backoff), permanent (fail fast, don't waste time), quota exhausted (long backoff, don't waste money), or degraded (retry once). This classification drives every downstream decision.
+- **Per-call-site fallback chains** — Different call sites have different priorities. Your chat endpoint might prefer Claude → GPT-4o → Llama. Your summarizer might prefer Groq (fast) → GPT-4o-mini (cheap). Each has its own chain, retry policy, and budget rules.
+- **RPM-aware rate limiting** — When a provider goes down and traffic cascades to the fallback, the rate gate prevents the thundering herd from tripping the fallback's circuit breaker too. Requests queue orderly instead of all firing at once.
+- **Exponential backoff with jitter** — Configurable per call site. Jitter prevents synchronized retry storms across concurrent requests.
+
+### Observability
+- **Event emission on every state change** — Fallback used, circuit breaker tripped, budget warning, all providers exhausted. Every event includes the call site, provider, and failure context. Plug in your own `EventHook` to route to your alerting stack.
+- **Cost tracking + budget enforcement** — Every call is logged to SQLite with provider, model, token counts, and cost. Daily/weekly/monthly budget limits with configurable warning thresholds. When a budget is exceeded, paid providers are automatically skipped — not errored.
+- **RoutingResult tells the full story** — Every call returns which provider was used, whether fallback was needed, how many attempts, which providers failed and why. When something goes wrong, you don't debug — you read.
+
+### Operations
+- **Hot-reloadable config** — Swap routing config without restart. Circuit breaker state is preserved across reloads. Add providers, change chains, adjust retry policies — all live.
+- **YAML config with env var expansion** — `${API_KEY}` and `${VAR:-default}` syntax. Local overlay files (`.local.yaml`) for per-environment overrides that survive upstream updates.
+- **Disk-persistent circuit breaker state** — Opt-in. Circuit breaker memory survives process restarts so recovered providers don't get re-probed unnecessarily.
+- **System-wide degradation level** — `compute_degradation_level()` gives you a single L0-L5 reading across all providers. L0 = normal, L5 = local compute down. Use it to adjust system behavior at a higher level.
+
+### Developer Experience
+- **MultiDelegate** — Maps provider types to SDK delegates. `from_config()` auto-detects API keys from environment. OpenAI-compatible providers (Ollama, LM Studio, DeepInfra, Together) automatically route through the OpenAI delegate with per-provider `base_url`.
+- **Model alias resolution** — Type "sonnet" instead of "anthropic/claude-sonnet-4-6". Fuzzy matching catches typos.
+- **Protocol-based extensibility** — Implement `CallDelegate` for any LLM backend. Optional `EventHook` for observability, `ActivityTracker` for metrics. No mandatory dependencies beyond PyYAML and aiosqlite.
 
 ## Installation
 
